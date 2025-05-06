@@ -24,11 +24,12 @@ if (!require("pacman")) install.packages("pacman")
 # 1. install `devtools` if you don't already have it. Note that you might need to update the 'rlang' package 
 # ----------
 #install.packages("devtools") # download developer tools package 
-#library(devtools)            # load library 
+library(devtools)            # load library 
 
 # 2. install the package ("augsynth"). you can find this path on the GitHub instructions
 # ----------
-#devtools::install_github("ebenmichael/augsynth")
+
+devtools::install_github("ebenmichael/augsynth")
 
 
 # install libraries - install "augsynth" here since it is now on CRAN
@@ -166,7 +167,7 @@ This is basically what [Card-Krueger (1994)](https://davidcard.berkeley.edu/pape
 # create a dataset for kansas and colorado
 kc <- 
   kansas %>%
-  filter(state %in% c("Kansas","Colorado")) %>%
+  filter(state %in% c("Kansas","Colorado")) %>% # %in% condition (vector)
   filter(year_qtr >= 2012.5 & year_qtr<= 2012.75) 
 
 # pre-treatment difference

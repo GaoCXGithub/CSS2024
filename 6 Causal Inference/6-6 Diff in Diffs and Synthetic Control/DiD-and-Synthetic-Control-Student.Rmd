@@ -23,7 +23,7 @@ if (!require("pacman")) install.packages("pacman")
 # 1. install `devtools` if you don't already have it. Note that you might need to update the 'rlang' package 
 # ----------
 #install.packages("devtools") # download developer tools package (UNCOMMENT TO RUN) 
-#library(devtools)            # load library                     (UNCOMMENT TO RUN) 
+library(devtools)            # load library                     (UNCOMMENT TO RUN) 
 
 # 2. install the package ("augsynth"). you can find this path on the GitHub instructions
 # ----------
@@ -61,7 +61,7 @@ We'll use the kansas dataset that comes from the `augsynth` package Our goal her
 data(kansas)
 # look at basic info about the data set: 
 # try glimpse or summary... which is more useful? 
-
+summary(kansas)
 ```
 
 We have a lot of information here! We have quarterly state GDP from 1990 to 2016 for each U.S. state, as well as some other covariates. Let's begin by adding a treatment indicator to Kansas in Q2 2012 and onward.
@@ -74,7 +74,7 @@ kansas <-
   # select subset of variables 
   select(year, qtr, year_qtr, state, treated, gdp, lngdpcapita, fips) %>% 
   # create new treatment flag just to see
-  ...(treatment = ifelse(..., ..., ...))
+  mutate(treatment = ifelse(state == "Kansas" & year_qtr >= 2012.5, 1, 0))
 
 head(kansas)
 ```
@@ -110,7 +110,7 @@ kansas %>%
 
 **QUESTION**: Looks like GDP went up after the tax cut! What is the problem with this inference?
 
-**ANSWER**: 
+**ANSWER**:
 
 Ideally, we would like to compare treated Kansas to control Kansas. Because of the fundamental problem of causal inference, we will never oberserve both of these conditions though. The core idea behind DiD is that we could instead use the fact that our treated unit was similar to a control unit, and then measure the differences between them. Perhaps we could choose neighboring Colorado:
 
@@ -146,7 +146,7 @@ kansas %>%
   ylab('State GDP Per Capita \n(in thousands)')
 ```
 
-This is basically what [Card-Krueger (1994)](https://davidcard.berkeley.edu/papers/njmin-aer.pdf) did measuring unemployment rates among New Jersey and Pennsylvania fast food restaurants. 
+This is basically what [Card-Krueger (1994)](https://davidcard.berkeley.edu/papers/njmin-aer.pdf) did measuring unemployment rates among New Jersey and Pennsylvania fast food restaurants.
 
 **Challenge**: Try writing a simple DiD estimate using dplyr/tidyr (use subtraction instead of a regression):
 
@@ -155,15 +155,40 @@ This is basically what [Card-Krueger (1994)](https://davidcard.berkeley.edu/pape
 #
 # DiD for: kansas-colorado
 # ----------------------------------------------------------------
+test <- 
+  kansas %>%
+  filter(state %in% c("Kansas","Colorado")) %>%
+  filter(year_qtr >= 2012.5 & year_qtr<= 2012.75) 
 
+pre_diff <- 
+  test %>%
+  # filter out only the quarter we want
+  filter(year_qtr == 2012.5) %>%
+  # subset to select only vars we want
+  select(state, 
+         lngdpcapita) %>%
+  # make the data wide
+  pivot_wider(names_from = state, 
+              values_from = lngdpcapita) %>%
+  # subtract to make calculation
+  summarise(Colorado - Kansas)
 
+post_diff <-
+  test %>% filter(year_qtr == 2012.75) %>%
+  select(state, lngdpcapita) %>%
+  pivot_wider(names_from = state,
+              values_from = lngdpcapita) %>%
+  summarise(Colorado - Kansas)
+
+diff_in_diff <- post_diff - pre_diff
+diff_in_diff
 ```
 
 Looks like our treatment effect is about .003 (in logged thousands dollars per capita). Again this is the basic idea behind Card-Krueger.
 
 **QUESTION**: Why might there still be a problem with this estimate?
 
-**ANSWER**: 
+**ANSWER**: Why Corolado?
 
 # Parallel Trends Assumptions
 
@@ -213,12 +238,70 @@ The two lines somewhat move together, but the gap does grow and shrink at variou
 #
 # parallel trends: add a third state
 # ----------------------------------------------------------------
+kansas %>%
+  
+  # process
+  # ---------
+  filter(state %in% c("Kansas","Colorado", "Iowa")) %>%
+  # plotting all of the time periods -- not filtering out any of them
 
+  # plot
+  # ---------
+  ggplot() + 
+  # add in point layer
+  geom_point(aes(x = year_qtr, 
+                 y = lngdpcapita, 
+                 color = state)) +
+  # add in line layer
+  geom_line(aes(x = year_qtr, 
+                y = lngdpcapita, 
+                color = state)) +
+  # add a horizontal line
+  geom_vline(aes(xintercept = 2012.5)) +
+  
+  # themes
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  
+  # labels
+  ggtitle('Colorado and Kansas GDP \n before/after Kansas tax cut') +
+  xlab('Year-Quarter') +
+  ylab('State GDP Per Capita \n(in thousands)')
+```
+
+```{r}
+test <- 
+  kansas %>%
+  filter(state %in% c("Kansas","Iowa")) %>%
+  filter(year_qtr >= 2012.5 & year_qtr<= 2012.75) 
+
+pre_diff <- 
+  test %>%
+  # filter out only the quarter we want
+  filter(year_qtr == 2012.5) %>%
+  # subset to select only vars we want
+  select(state, 
+         lngdpcapita) %>%
+  # make the data wide
+  pivot_wider(names_from = state, 
+              values_from = lngdpcapita) %>%
+  # subtract to make calculation
+  summarise(Iowa - Kansas)
+
+post_diff <-
+  test %>% filter(year_qtr == 2012.75) %>%
+  select(state, lngdpcapita) %>%
+  pivot_wider(names_from = state,
+              values_from = lngdpcapita) %>%
+  summarise(Iowa - Kansas)
+
+diff_in_diff <- post_diff - pre_diff
+diff_in_diff
 ```
 
 **QUESTION**: Would Colorado or your choice? be the more plausible control unit in this case? Why?
 
-**ANSWER**: 
+**ANSWER**:
 
 Selecting comparative units this way can be hard to justify theoretically, and sometimes we do not have a good candidate. What can we do then? This is where synthetic control comes in.
 
@@ -230,10 +313,9 @@ For constructing a synthetic control, we are going to primarily rely on the [`au
 
 `augsynth(outcome ~ trt, unit, time, t_int, data)`
 
-
 ## augsynth library
 
-This is a very flexible package that can handle both synthetic controls as well as augmentation and staggered adoption. It's a bit more clunky but will handle the heavy lifting of estimation. Here is a [tutorial](https://github.com/ebenmichael/augsynth/blob/master/vignettes/singlesynth-vignette.md) for simultaneous adoption. 
+This is a very flexible package that can handle both synthetic controls as well as augmentation and staggered adoption. It's a bit more clunky but will handle the heavy lifting of estimation. Here is a [tutorial](https://github.com/ebenmichael/augsynth/blob/master/vignettes/singlesynth-vignette.md) for simultaneous adoption.
 
 Note that the ATT here varies slightly from the tutorial because we have specified 2012.5 as the first treatment quarter, whereas the tutorial specifies 2012.25 (the quarter in which the law was passed (May)).
 
@@ -318,10 +400,9 @@ data.frame(syn$weights) %>%
   
 ```
 
-## tidysynth library 
+## tidysynth library
 
 Before we move on, I want to talk about the `tidysynth` library, which is a new, `tidyverse`-friendly implementation of original `synth` package. As you will see, it is easy to use to visualize the parallel trends, but it cannot handle the augmentation functions we might want to implement and it doesn't have as much support for estimation, unlike `augsynth`. So, you should be aware of it, use it for visualization, but maybe use `augsynth` for estimation and augmentation. Here is a helpful tutorial by the [package author](http://ericdunford.com/tidysynth/) as well as an [another implementation](https://causalpolicy.nl/practicals/03_synthetic_control/synthetic_control.html) that might be helpful.
-
 
 ```{r}
 
@@ -402,7 +483,7 @@ View the differences between Kansas and Synthetic Kansas.
 kansas_out %>% plot_differences()
 ```
 
-Differences in each state in the donor pool from Kansas. So this shows how much each state varies from Kansas. 
+Differences in each state in the donor pool from Kansas. So this shows how much each state varies from Kansas.
 
 ```{r}
 #
@@ -410,7 +491,6 @@ Differences in each state in the donor pool from Kansas. So this shows how much 
 # ----------------------------------------------------------------
 kansas_out %>% plot_placebos()
 ```
-
 
 ```{r}
 
@@ -474,11 +554,11 @@ kansas_synkansas %>%
 
 **QUESTION**: How does pre-treatment matching between Kansas and Synthetic Kansas look here?
 
-**ANSWER**: 
+**ANSWER**:
 
 ## Augmentation
 
-Let's play a bit with the augmentation parameters that will adjust the weights to see if we can find better fits to create a synthetic control.  
+Let's play a bit with the augmentation parameters that will adjust the weights to see if we can find better fits to create a synthetic control.
 
 ```{r}
 #
@@ -606,15 +686,16 @@ collective_bargaining <- read_delim("https://dataverse.harvard.edu/api/access/da
 
 head(collective_bargaining)
 ```
+
 The main variables we'll use here are:
 
 The dataset contains several important variables that we'll use:
 
-- `year`, `State`: The state and year of the measurement
-- `YearCBrequired`: The year that the state adopted mandatory collective bargaining
-- `lnppexpend`: Log per pupil expenditures in 2010 dollars
+-   `year`, `State`: The state and year of the measurement
+-   `YearCBrequired`: The year that the state adopted mandatory collective bargaining
+-   `lnppexpend`: Log per pupil expenditures in 2010 dollars
 
-Let's do some preprocessing before we estimate some models. We're going to remove DC and Wisconsin from the analysis and cabin our dataset to 1959 - 1997. Finally, we'll add a treatment indicator `cbr` which takes a 1 if the observation was a treated state after it adopted mandatory collective bargaining, or a 0 otherwise: 
+Let's do some preprocessing before we estimate some models. We're going to remove DC and Wisconsin from the analysis and cabin our dataset to 1959 - 1997. Finally, we'll add a treatment indicator `cbr` which takes a 1 if the observation was a treated state after it adopted mandatory collective bargaining, or a 0 otherwise:
 
 ```{r}
 #
@@ -635,7 +716,7 @@ collective_bargaining_clean <-
 
 We're ready to start estimating a model! To do this, we use the `multisynth()` function that has the following signature:
 
-```
+```         
 mutltisynth(outcome ~ treatment, unit, time, nu, data,  n_leads)
 ```
 
@@ -707,9 +788,9 @@ ppool_syn_time <- multisynth(...)
 
 ```
 
-Finally, we can add in augmentation. Again augmentation essentially adds a regularization penalty to the synthetic control weights. In the multisynth context, you may especially want to do this when the pre-treatment fit is poor for some of your units. There are a couple of different options for augmentation. One is to specify `fixed_effects = TRUE` in the multsynth call, and this will estimate unit fixed effects models after de-meaning each unit. We can also specify a `n_factors = ` argument (substituting an integer in) to use the [`gsynth` method](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2584200) that uses cross-validation to estimate the weights for multi-synthetic control. 
+Finally, we can add in augmentation. Again augmentation essentially adds a regularization penalty to the synthetic control weights. In the multisynth context, you may especially want to do this when the pre-treatment fit is poor for some of your units. There are a couple of different options for augmentation. One is to specify `fixed_effects = TRUE` in the multsynth call, and this will estimate unit fixed effects models after de-meaning each unit. We can also specify a `n_factors =` argument (substituting an integer in) to use the [`gsynth` method](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2584200) that uses cross-validation to estimate the weights for multi-synthetic control.
 
-Try creating an augmented synthetic control model. How do your balance and estimates compare? 
+Try creating an augmented synthetic control model. How do your balance and estimates compare?
 
 ```{r}
 # likely need to install gsynth package do not need to load
